@@ -8,3 +8,8 @@ edition = "2021"
 [dependencies]
 realfft = "3.3.0"
 rustfft = "6.1.0"
+ipp-sys = { git = "ssh://git@github.com/dgrahelj/ipp-sys.git", branch = "dan/generate-2022-bindings", features = ["2022"], optional = true  }
+
+[features]
+default = []
+ipp = ["ipp-sys"]
