@@ -738,26 +738,30 @@ mod ipp_fft {
         }
     }
 
-    pub fn complex_multiply_accumulate(result: &mut [Complex32], a: &[Complex32], b: &[Complex32]) {
+    pub fn complex_multiply_accumulate(
+        result: &mut [Complex32],
+        a: &[Complex32],
+        b: &[Complex32],
+        temp_buffer: &mut [Complex32],
+    ) {
         assert_eq!(result.len(), a.len());
         assert_eq!(result.len(), b.len());
+        assert_eq!(temp_buffer.len(), a.len());
 
         unsafe {
-            // IPP doesn't have a direct complex multiply-accumulate, so we do it in two steps
-            // First, multiply the complex arrays
+            // Use pre-allocated temp buffer instead of allocating
             let len = result.len();
-            let mut temp = vec![Complex32::new(0.0, 0.0); len];
 
-            ippsMulC_32fc(
+            // Use ippsMul_32fc instead of ippsMulC_32fc to correctly multiply arrays
+            ippsMul_32fc(
                 a.as_ptr() as *const ipp_sys::Ipp32fc,
-                *(b.as_ptr() as *const ipp_sys::Ipp32fc),
-                temp.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
+                b.as_ptr() as *const ipp_sys::Ipp32fc,
+                temp_buffer.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
                 len as i32,
             );
 
-            // Then add to the result
             ippsAdd_32fc(
-                temp.as_ptr() as *const ipp_sys::Ipp32fc,
+                temp_buffer.as_ptr() as *const ipp_sys::Ipp32fc,
                 result.as_ptr() as *const ipp_sys::Ipp32fc,
                 result.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
                 len as i32,
@@ -778,7 +782,19 @@ mod ipp_fft {
             );
         }
     }
+    #[test]
+    fn test_fft_convolver_passthrough() {
+        let mut response = [0.0; 1024];
+        response[0] = 1.0;
+        let mut convolver = FFTConvolver::init(&response, 1024, response.len());
+        let input = vec![1.0; 1024];
+        let mut output = vec![0.0; 1024];
+        convolver.process(&input, &mut output);
 
+        for i in 0..1024 {
+            assert!((output[i] - 1.0).abs() < 1e-6);
+        }
+    }
     #[derive(Default, Clone)]
     pub struct FFTConvolver {
         ir_len: usize,
@@ -797,6 +813,7 @@ mod ipp_fft {
         current: usize,
         input_buffer: Vec<f32>,
         input_buffer_fill: usize,
+        temp_buffer: Vec<Complex32>,
     }
 
     impl Convolution for FFTConvolver {
@@ -858,6 +875,7 @@ mod ipp_fft {
 
             // reset current position
             let current = 0;
+            let temp_buffer = vec![Complex32::new(0.0, 0.0); fft_complex_size];
 
             Self {
                 ir_len,
@@ -876,6 +894,7 @@ mod ipp_fft {
                 current,
                 input_buffer,
                 input_buffer_fill,
+                temp_buffer,
             }
         }
 
@@ -988,6 +1007,7 @@ mod ipp_fft {
                             &mut self.pre_multiplied,
                             &self.segments_ir[index_ir],
                             &self.segments[index_audio],
+                            &mut self.temp_buffer,
                         );
                     }
                 }
@@ -1005,6 +1025,7 @@ mod ipp_fft {
                     &mut self.conv,
                     &self.segments[self.current],
                     &self.segments_ir[0],
+                    &mut self.temp_buffer,
                 );
 
                 // Backward FFT
@@ -1262,6 +1283,77 @@ mod ipp_fft {
                 processed += processing;
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "ipp"))]
+mod tests {
+    use super::*;
+    use crate::{fft_convolver::rust_fft, Convolution};
+
+    // Helper function that runs both implementations and compares results
+    fn compare_implementations(impulse_response: &[f32], input: &[f32], block_size: usize) {
+        let max_len = impulse_response.len();
+
+        // Create both implementations
+        let mut rust_convolver =
+            rust_fft::FFTConvolver::init(impulse_response, block_size, max_len);
+        let mut ipp_convolver = ipp_fft::FFTConvolver::init(impulse_response, block_size, max_len);
+
+        // Prepare output buffers
+        let mut rust_output = vec![0.0; input.len()];
+        let mut ipp_output = vec![0.0; input.len()];
+
+        // Process with both implementations
+        rust_convolver.process(input, &mut rust_output);
+        ipp_convolver.process(input, &mut ipp_output);
+
+        // Compare results (accounting for floating-point precision differences)
+        for i in 0..input.len() {
+            assert!(
+                (rust_output[i] - ipp_output[i]).abs() < 1e-5,
+                "Outputs differ at position {}: rust={}, ipp={}",
+                i,
+                rust_output[i],
+                ipp_output[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_ipp_vs_rust_impulse() {
+        // Test with an impulse response
+        let mut response = vec![0.0; 1024];
+        response[0] = 1.0;
+        let input = vec![1.0; 1024];
+
+        compare_implementations(&response, &input, 256);
+    }
+
+    #[test]
+    fn test_ipp_vs_rust_decay() {
+        // Test with a decaying impulse response
+        let mut response = vec![0.0; 1024];
+        for i in 0..response.len() {
+            response[i] = 0.9f32.powi(i as i32);
+        }
+        let input = vec![1.0; 1024];
+
+        compare_implementations(&response, &input, 256);
+    }
+
+    #[test]
+    fn test_ipp_vs_rust_sine() {
+        // Test with a sine wave input
+        let mut response = vec![0.0; 1024];
+        response[0] = 1.0;
+
+        let mut input = vec![0.0; 1024];
+        for i in 0..input.len() {
+            input[i] = (i as f32 * 0.1).sin();
+        }
+
+        compare_implementations(&response, &input, 128);
     }
 }
 
