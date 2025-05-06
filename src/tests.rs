@@ -4,6 +4,20 @@ mod tests {
     use crate::fft_convolver::FFTConvolver;
     use crate::{Convolution, Sample};
 
+    #[test]
+    fn test_fft_convolver_passthrough() {
+        let mut response = [0.0; 1024];
+        response[0] = 1.0;
+        let mut convolver = FFTConvolver::init(&response, 1024, response.len());
+        let input = vec![1.0; 1024];
+        let mut output = vec![0.0; 1024];
+        convolver.process(&input, &mut output);
+
+        for i in 0..1024 {
+            assert!((output[i] - 1.0).abs() < 1e-6);
+        }
+    }
+
     fn generate_sinusoid(
         length: usize,
         frequency: f32,
