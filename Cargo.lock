@@ -13,6 +13,7 @@ name = "convolution"
 version = "0.1.0"
 dependencies = [
  "ipp-sys",
+ "num-complex",
  "realfft",
  "rustfft",
 ]
