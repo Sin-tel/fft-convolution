@@ -45,8 +45,6 @@ impl Fft {
     }
 
     pub fn init(&mut self, size: usize) {
-        self.clean_up();
-
         assert!(size > 0, "FFT size must be greater than 0");
         assert!(size.is_power_of_two(), "FFT size must be a power of 2");
 
@@ -66,9 +64,9 @@ impl Fft {
         }
 
         // Allocate aligned memory for buffers to get best SIMD performance
-        let mut init_buffer = allocate_aligned_buffer(init_size as usize);
-        let scratch_buffer = allocate_aligned_buffer(work_buf_size as usize);
-        let mut spec = allocate_aligned_buffer(spec_size as usize);
+        let mut init_buffer = vec![0; init_size as usize];
+        let scratch_buffer = vec![0; work_buf_size as usize];
+        let mut spec = vec![0; spec_size as usize];
 
         unsafe {
             ippsDFTInit_R_32f(
@@ -78,15 +76,6 @@ impl Fft {
                 spec.as_mut_ptr() as *mut ipp_sys::IppsDFTSpec_R_32f,
                 init_buffer.as_mut_ptr(),
             );
-        }
-
-        // Free the init buffer as it's no longer needed
-        unsafe {
-            if !init_buffer.is_empty() {
-                let ptr = init_buffer.as_mut_ptr();
-                mem::forget(mem::replace(&mut init_buffer, Vec::new()));
-                ippsFree(ptr as *mut _);
-            }
         }
 
         self.size = size;
@@ -154,46 +143,6 @@ impl Fft {
 
         Ok(())
     }
-
-    fn clean_up(&mut self) {
-        unsafe {
-            if !self.spec.is_empty() {
-                let ptr = self.spec.as_mut_ptr();
-                mem::forget(mem::replace(&mut self.spec, Vec::new()));
-                ippsFree(ptr as *mut _);
-            }
-
-            if !self.scratch_buffer.is_empty() {
-                let ptr = self.scratch_buffer.as_mut_ptr();
-                mem::forget(mem::replace(&mut self.scratch_buffer, Vec::new()));
-                ippsFree(ptr as *mut _);
-            }
-        }
-        self.size = 0;
-    }
-}
-
-impl Drop for Fft {
-    fn drop(&mut self) {
-        self.clean_up();
-    }
-}
-
-// Helper function to allocate aligned memory using IPP functions
-fn allocate_aligned_buffer(size: usize) -> Vec<u8> {
-    if size == 0 {
-        return Vec::new();
-    }
-
-    unsafe {
-        let ptr = ippsMalloc_8u(size as i32);
-        if ptr.is_null() {
-            panic!("Failed to allocate aligned memory");
-        }
-
-        // Construct a vector from the IPP-aligned pointer
-        Vec::from_raw_parts(ptr, size, size)
-    }
 }
 
 pub fn complex_size(size: usize) -> usize {
@@ -226,22 +175,20 @@ pub fn complex_multiply_accumulate(
     assert_eq!(temp_buffer.len(), a.len());
 
     unsafe {
-        // Use pre-allocated temp buffer instead of allocating
-        let len = result.len();
+        let len = result.len() as i32;
 
-        // Use ippsMul_32fc instead of ippsMulC_32fc to correctly multiply arrays
         ippsMul_32fc(
             a.as_ptr() as *const ipp_sys::Ipp32fc,
             b.as_ptr() as *const ipp_sys::Ipp32fc,
             temp_buffer.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-            len as i32,
+            len,
         );
 
         ippsAdd_32fc(
             temp_buffer.as_ptr() as *const ipp_sys::Ipp32fc,
             result.as_ptr() as *const ipp_sys::Ipp32fc,
             result.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-            len as i32,
+            len,
         );
     }
 }
