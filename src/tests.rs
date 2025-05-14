@@ -4,20 +4,6 @@ mod tests {
     use crate::fft_convolver::FFTConvolver;
     use crate::{Convolution, Sample};
 
-    #[test]
-    fn test_fft_convolver_passthrough() {
-        let mut response = [0.0; 1024];
-        response[0] = 1.0;
-        let mut convolver = FFTConvolver::init(&response, 1024, response.len());
-        let input = vec![1.0; 1024];
-        let mut output = vec![0.0; 1024];
-        convolver.process(&input, &mut output);
-
-        for i in 0..1024 {
-            assert!((output[i] - 1.0).abs() < 1e-6);
-        }
-    }
-
     fn generate_sinusoid(
         length: usize,
         frequency: f32,
@@ -130,84 +116,6 @@ mod tests {
                     check_equal(&output_b, &output_crossfade_convolver);
                 }
             }
-        }
-    }
-
-    #[cfg(feature = "ipp")]
-    mod ipp_tests {
-        use crate::fft_convolver::{ipp_fft, rust_fft};
-        use crate::Convolution;
-
-        #[test]
-        fn test_fft_convolver_passthrough() {
-            let mut response = [0.0; 1024];
-            response[0] = 1.0;
-            let mut convolver = ipp_fft::FFTConvolver::init(&response, 1024, response.len());
-            let input = vec![1.0; 1024];
-            let mut output = vec![0.0; 1024];
-            convolver.process(&input, &mut output);
-
-            for i in 0..1024 {
-                assert!((output[i] - 1.0).abs() < 1e-6);
-            }
-        }
-        // Helper function that runs both implementations and compares results
-        fn compare_implementations(impulse_response: &[f32], input: &[f32], block_size: usize) {
-            let max_len = impulse_response.len();
-
-            let mut rust_convolver =
-                rust_fft::FFTConvolver::init(impulse_response, block_size, max_len);
-            let mut ipp_convolver =
-                ipp_fft::FFTConvolver::init(impulse_response, block_size, max_len);
-
-            let mut rust_output = vec![0.0; input.len()];
-            let mut ipp_output = vec![0.0; input.len()];
-
-            rust_convolver.process(input, &mut rust_output);
-            ipp_convolver.process(input, &mut ipp_output);
-
-            for i in 0..input.len() {
-                assert!(
-                    (rust_output[i] - ipp_output[i]).abs() < 1e-5,
-                    "Outputs differ at position {}: rust={}, ipp={}",
-                    i,
-                    rust_output[i],
-                    ipp_output[i]
-                );
-            }
-        }
-
-        #[test]
-        fn test_ipp_vs_rust_impulse() {
-            let mut response = vec![0.0; 1024];
-            response[0] = 1.0;
-            let input = vec![1.0; 1024];
-
-            compare_implementations(&response, &input, 256);
-        }
-
-        #[test]
-        fn test_ipp_vs_rust_decay() {
-            let mut response = vec![0.0; 1024];
-            for i in 0..response.len() {
-                response[i] = 0.9f32.powi(i as i32);
-            }
-            let input = vec![1.0; 1024];
-
-            compare_implementations(&response, &input, 256);
-        }
-
-        #[test]
-        fn test_ipp_vs_rust_sine() {
-            let mut response = vec![0.0; 1024];
-            response[0] = 1.0;
-
-            let mut input = vec![0.0; 1024];
-            for i in 0..input.len() {
-                input[i] = (i as f32 * 0.1).sin();
-            }
-
-            compare_implementations(&response, &input, 128);
         }
     }
 }

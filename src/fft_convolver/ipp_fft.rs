@@ -2,6 +2,8 @@ use crate::{Convolution, Sample};
 use ipp_sys::*;
 use num_complex::Complex32;
 use std::mem;
+use std::ptr;
+use std::slice;
 
 pub struct Fft {
     size: usize,
@@ -63,9 +65,10 @@ impl Fft {
             );
         }
 
-        let mut init_buffer = allocate_aligned_byte_buffer(init_size as usize);
-        let scratch_buffer = allocate_aligned_byte_buffer(work_buf_size as usize);
-        let mut spec = allocate_aligned_byte_buffer(spec_size as usize);
+        // Allocate aligned memory for buffers to get best SIMD performance
+        let mut init_buffer = allocate_aligned_buffer(init_size as usize);
+        let scratch_buffer = allocate_aligned_buffer(work_buf_size as usize);
+        let mut spec = allocate_aligned_buffer(spec_size as usize);
 
         unsafe {
             ippsDFTInit_R_32f(
@@ -77,14 +80,25 @@ impl Fft {
             );
         }
 
-        drop_aligned_buffer(&mut init_buffer);
+        // Free the init buffer as it's no longer needed
+        unsafe {
+            if !init_buffer.is_empty() {
+                let ptr = init_buffer.as_mut_ptr();
+                mem::forget(mem::replace(&mut init_buffer, Vec::new()));
+                ippsFree(ptr as *mut _);
+            }
+        }
 
         self.size = size;
         self.spec = spec;
         self.scratch_buffer = scratch_buffer;
     }
 
-    pub fn forward(&mut self, input: &[f32], output: &mut [Complex32]) -> Result<(), &'static str> {
+    pub fn forward(
+        &mut self,
+        input: &mut [f32],
+        output: &mut [Complex32],
+    ) -> Result<(), &'static str> {
         if self.size == 0 {
             return Err("FFT not initialized");
         }
@@ -99,7 +113,7 @@ impl Fft {
         unsafe {
             ippsDFTFwd_RToCCS_32f(
                 input.as_ptr(),
-                output.as_mut_ptr() as *mut Ipp32f, // the API takes the pointer to the first float member of the complex array
+                output.as_mut_ptr() as *mut _,
                 self.spec.as_ptr() as *const DFTSpec_R_32f,
                 self.scratch_buffer.as_mut_ptr(),
             );
@@ -126,7 +140,7 @@ impl Fft {
 
         unsafe {
             ippsDFTInv_CCSToR_32f(
-                input.as_ptr() as *const Ipp32f, // the API takes the pointer to the first float member of the complex array
+                input.as_ptr() as *const _,
                 output.as_mut_ptr(),
                 self.spec.as_ptr() as *const DFTSpec_R_32f,
                 self.scratch_buffer.as_mut_ptr(),
@@ -142,8 +156,19 @@ impl Fft {
     }
 
     fn clean_up(&mut self) {
-        drop_aligned_buffer(&mut self.spec);
-        drop_aligned_buffer(&mut self.scratch_buffer);
+        unsafe {
+            if !self.spec.is_empty() {
+                let ptr = self.spec.as_mut_ptr();
+                mem::forget(mem::replace(&mut self.spec, Vec::new()));
+                ippsFree(ptr as *mut _);
+            }
+
+            if !self.scratch_buffer.is_empty() {
+                let ptr = self.scratch_buffer.as_mut_ptr();
+                mem::forget(mem::replace(&mut self.scratch_buffer, Vec::new()));
+                ippsFree(ptr as *mut _);
+            }
+        }
         self.size = 0;
     }
 }
@@ -154,8 +179,8 @@ impl Drop for Fft {
     }
 }
 
-// Helper functions for allocating/dropping/cloning aligned memory using IPP functions
-fn allocate_aligned_byte_buffer(size: usize) -> Vec<u8> {
+// Helper function to allocate aligned memory using IPP functions
+fn allocate_aligned_buffer(size: usize) -> Vec<u8> {
     if size == 0 {
         return Vec::new();
     }
@@ -165,90 +190,9 @@ fn allocate_aligned_byte_buffer(size: usize) -> Vec<u8> {
         if ptr.is_null() {
             panic!("Failed to allocate aligned memory");
         }
-        ippsZero_8u(ptr, size as i32);
+
+        // Construct a vector from the IPP-aligned pointer
         Vec::from_raw_parts(ptr, size, size)
-    }
-}
-
-fn allocate_aligned_complex_f32_buffer(size: usize) -> Vec<Complex32> {
-    if size == 0 {
-        return Vec::new();
-    }
-
-    unsafe {
-        let ptr = ippsMalloc_32fc(size as i32);
-        if ptr.is_null() {
-            panic!("Failed to allocate aligned memory for complex buffer");
-        }
-        ippsZero_32fc(ptr as *mut ipp_sys::Ipp32fc, size as i32);
-        Vec::from_raw_parts(ptr as *mut Complex32, size, size)
-    }
-}
-
-fn allocate_aligned_f32_buffer(size: usize) -> Vec<f32> {
-    if size == 0 {
-        return Vec::new();
-    }
-
-    unsafe {
-        let ptr = ippsMalloc_32f(size as i32);
-        if ptr.is_null() {
-            panic!("Failed to allocate aligned memory for float buffer");
-        }
-        ippsZero_32f(ptr, size as i32);
-        Vec::from_raw_parts(ptr as *mut f32, size, size)
-    }
-}
-
-fn drop_aligned_buffer<T>(buffer: &mut Vec<T>) {
-    unsafe {
-        if !buffer.is_empty() {
-            let ptr = buffer.as_mut_ptr();
-            mem::forget(mem::replace(buffer, Vec::new()));
-            ippsFree(ptr as *mut _);
-        }
-    }
-}
-
-fn clone_aligned_f32_buffer(src: &[f32]) -> Vec<f32> {
-    if src.is_empty() {
-        return Vec::new();
-    }
-
-    let mut new_buffer = allocate_aligned_f32_buffer(src.len());
-    unsafe {
-        ippsCopy_32f(src.as_ptr(), new_buffer.as_mut_ptr(), src.len() as i32);
-    }
-    new_buffer
-}
-
-fn clone_aligned_complex_f32_buffer(src: &[Complex32]) -> Vec<Complex32> {
-    if src.is_empty() {
-        return Vec::new();
-    }
-
-    let mut new_buffer = allocate_aligned_complex_f32_buffer(src.len());
-    unsafe {
-        ippsCopy_32fc(
-            src.as_ptr() as *const ipp_sys::Ipp32fc,
-            new_buffer.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-            src.len() as i32,
-        );
-    }
-    new_buffer
-}
-
-pub fn aligned_f32_swap(src: &mut [f32], dst: &mut [f32], temp: &mut [f32]) {
-    assert_eq!(
-        src.len(),
-        dst.len(),
-        "Buffers must be the same length for swapping"
-    );
-
-    unsafe {
-        ippsCopy_32f(src.as_ptr(), temp.as_mut_ptr(), src.len() as i32);
-        ippsCopy_32f(dst.as_ptr(), src.as_mut_ptr(), dst.len() as i32);
-        ippsCopy_32f(temp.as_ptr(), dst.as_mut_ptr(), temp.len() as i32);
     }
 }
 
@@ -282,20 +226,22 @@ pub fn complex_multiply_accumulate(
     assert_eq!(temp_buffer.len(), a.len());
 
     unsafe {
-        let len = result.len() as i32;
+        // Use pre-allocated temp buffer instead of allocating
+        let len = result.len();
 
+        // Use ippsMul_32fc instead of ippsMulC_32fc to correctly multiply arrays
         ippsMul_32fc(
             a.as_ptr() as *const ipp_sys::Ipp32fc,
             b.as_ptr() as *const ipp_sys::Ipp32fc,
             temp_buffer.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-            len,
+            len as i32,
         );
 
         ippsAdd_32fc(
             temp_buffer.as_ptr() as *const ipp_sys::Ipp32fc,
             result.as_ptr() as *const ipp_sys::Ipp32fc,
             result.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-            len,
+            len as i32,
         );
     }
 }
@@ -313,15 +259,27 @@ pub fn sum(result: &mut [f32], a: &[f32], b: &[f32]) {
         );
     }
 }
+#[test]
+fn test_fft_convolver_passthrough() {
+    let mut response = [0.0; 1024];
+    response[0] = 1.0;
+    let mut convolver = FFTConvolver::init(&response, 1024, response.len());
+    let input = vec![1.0; 1024];
+    let mut output = vec![0.0; 1024];
+    convolver.process(&input, &mut output);
 
-#[derive(Default)]
+    for i in 0..1024 {
+        assert!((output[i] - 1.0).abs() < 1e-6);
+    }
+}
+#[derive(Default, Clone)]
 pub struct FFTConvolver {
     ir_len: usize,
     block_size: usize,
-    _seg_size: usize,
+    seg_size: usize,
     seg_count: usize,
     active_seg_count: usize,
-    _fft_complex_size: usize,
+    fft_complex_size: usize,
     segments: Vec<Vec<Complex32>>,
     segments_ir: Vec<Vec<Complex32>>,
     fft_buffer: Vec<f32>,
@@ -355,19 +313,19 @@ impl Convolution for FFTConvolver {
         // FFT
         let mut fft = Fft::default();
         fft.init(seg_size);
-        let mut fft_buffer = allocate_aligned_f32_buffer(seg_size);
+        let mut fft_buffer = vec![0.; seg_size];
 
-        // prepare segments with aligned vectors
+        // prepare segments
         let mut segments = Vec::new();
         for _ in 0..seg_count {
-            segments.push(allocate_aligned_complex_f32_buffer(fft_complex_size));
+            segments.push(vec![Complex32::new(0., 0.); fft_complex_size]);
         }
 
         let mut segments_ir = Vec::new();
 
         // prepare ir
         for i in 0..seg_count {
-            let mut segment = allocate_aligned_complex_f32_buffer(fft_complex_size);
+            let mut segment = vec![Complex32::new(0., 0.); fft_complex_size];
             let remaining = ir_len - (i * block_size);
             let size_copy = if remaining >= block_size {
                 block_size
@@ -379,26 +337,26 @@ impl Convolution for FFTConvolver {
             segments_ir.push(segment);
         }
 
-        // prepare convolution buffers with aligned memory
-        let pre_multiplied = allocate_aligned_complex_f32_buffer(fft_complex_size);
-        let conv = allocate_aligned_complex_f32_buffer(fft_complex_size);
-        let overlap = allocate_aligned_f32_buffer(block_size);
+        // prepare convolution buffers
+        let pre_multiplied = vec![Complex32::new(0., 0.); fft_complex_size];
+        let conv = vec![Complex32::new(0., 0.); fft_complex_size];
+        let overlap = vec![0.; block_size];
 
         // prepare input buffer
-        let input_buffer = allocate_aligned_f32_buffer(block_size);
+        let input_buffer = vec![0.; block_size];
         let input_buffer_fill = 0;
 
         // reset current position
         let current = 0;
-        let temp_buffer = allocate_aligned_complex_f32_buffer(fft_complex_size);
+        let temp_buffer = vec![Complex32::new(0.0, 0.0); fft_complex_size];
 
         Self {
             ir_len,
             block_size,
-            _seg_size: seg_size,
+            seg_size,
             seg_count,
             active_seg_count,
-            _fft_complex_size: fft_complex_size,
+            fft_complex_size,
             segments,
             segments_ir,
             fft_buffer,
@@ -425,6 +383,7 @@ impl Convolution for FFTConvolver {
         }
 
         unsafe {
+            // Zero out buffers
             ippsZero_32f(self.fft_buffer.as_mut_ptr(), self.fft_buffer.len() as i32);
             ippsZero_32fc(
                 self.conv.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
@@ -435,15 +394,7 @@ impl Convolution for FFTConvolver {
                 self.pre_multiplied.len() as i32,
             );
             ippsZero_32f(self.overlap.as_mut_ptr(), self.overlap.len() as i32);
-
-            ippsZero_32f(
-                self.input_buffer.as_mut_ptr(),
-                self.input_buffer.len() as i32,
-            );
         }
-
-        self.input_buffer_fill = 0;
-        self.current = 0;
 
         self.active_seg_count = ((new_ir_len as f64 / self.block_size as f64).ceil()) as usize;
 
@@ -470,15 +421,6 @@ impl Convolution for FFTConvolver {
                 ippsZero_32fc(
                     self.segments_ir[i].as_mut_ptr() as *mut ipp_sys::Ipp32fc,
                     self.segments_ir[i].len() as i32,
-                );
-            }
-        }
-
-        for segment in &mut self.segments {
-            unsafe {
-                ippsZero_32fc(
-                    segment.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-                    segment.len() as i32,
                 );
             }
         }
@@ -607,66 +549,7 @@ impl Convolution for FFTConvolver {
     }
 }
 
-impl Clone for FFTConvolver {
-    fn clone(&self) -> Self {
-        let mut segments = Vec::new();
-        for segment in &self.segments {
-            segments.push(clone_aligned_complex_f32_buffer(segment));
-        }
-
-        let mut segments_ir = Vec::new();
-        for segment_ir in &self.segments_ir {
-            segments_ir.push(clone_aligned_complex_f32_buffer(segment_ir));
-        }
-
-        let fft_buffer = clone_aligned_f32_buffer(&self.fft_buffer);
-        let pre_multiplied = clone_aligned_complex_f32_buffer(&self.pre_multiplied);
-        let conv = clone_aligned_complex_f32_buffer(&self.conv);
-        let overlap = clone_aligned_f32_buffer(&self.overlap);
-        let input_buffer = clone_aligned_f32_buffer(&self.input_buffer);
-        let temp_buffer = clone_aligned_complex_f32_buffer(&self.temp_buffer);
-
-        Self {
-            ir_len: self.ir_len,
-            block_size: self.block_size,
-            _seg_size: self._seg_size,
-            seg_count: self.seg_count,
-            active_seg_count: self.active_seg_count,
-            _fft_complex_size: self._fft_complex_size,
-            segments,
-            segments_ir,
-            fft_buffer,
-            fft: self.fft.clone(),
-            pre_multiplied,
-            conv,
-            overlap,
-            current: self.current,
-            input_buffer,
-            input_buffer_fill: self.input_buffer_fill,
-            temp_buffer,
-        }
-    }
-}
-
-impl Drop for FFTConvolver {
-    fn drop(&mut self) {
-        for segment in &mut self.segments {
-            drop_aligned_buffer(segment);
-        }
-
-        for segment_ir in &mut self.segments_ir {
-            drop_aligned_buffer(segment_ir);
-        }
-
-        drop_aligned_buffer(&mut self.fft_buffer);
-        drop_aligned_buffer(&mut self.pre_multiplied);
-        drop_aligned_buffer(&mut self.conv);
-        drop_aligned_buffer(&mut self.overlap);
-        drop_aligned_buffer(&mut self.input_buffer);
-        drop_aligned_buffer(&mut self.temp_buffer);
-    }
-}
-
+#[derive(Clone)]
 pub struct TwoStageFFTConvolver {
     head_convolver: FFTConvolver,
     tail_convolver0: FFTConvolver,
@@ -678,7 +561,6 @@ pub struct TwoStageFFTConvolver {
     tail_input: Vec<Sample>,
     tail_input_fill: usize,
     precalculated_pos: usize,
-    swap_buffer: Vec<Sample>,
 }
 
 const HEAD_BLOCK_SIZE: usize = 128;
@@ -716,8 +598,8 @@ impl Convolution for TwoStageFFTConvolver {
             })
             .unwrap_or_default();
 
-        let tail_output0 = allocate_aligned_f32_buffer(tail_block_size);
-        let tail_precalculated0 = allocate_aligned_f32_buffer(tail_block_size);
+        let tail_output0 = vec![0.0; tail_block_size];
+        let tail_precalculated0 = vec![0.0; tail_block_size];
 
         let tail_convolver = (max_response_length > 2 * tail_block_size)
             .then(|| {
@@ -730,11 +612,9 @@ impl Convolution for TwoStageFFTConvolver {
             })
             .unwrap_or_default();
 
-        let tail_output = allocate_aligned_f32_buffer(tail_block_size);
-        let tail_precalculated = allocate_aligned_f32_buffer(tail_block_size);
-        let tail_input = allocate_aligned_f32_buffer(tail_block_size);
-        let swap_buffer = allocate_aligned_f32_buffer(tail_block_size);
-
+        let tail_output = vec![0.0; tail_block_size];
+        let tail_precalculated = vec![0.0; tail_block_size];
+        let tail_input = vec![0.0; tail_block_size];
         let tail_input_fill = 0;
         let precalculated_pos = 0;
 
@@ -749,7 +629,6 @@ impl Convolution for TwoStageFFTConvolver {
             tail_input,
             tail_input_fill,
             precalculated_pos,
-            swap_buffer,
         }
     }
 
@@ -778,10 +657,11 @@ impl Convolution for TwoStageFFTConvolver {
 
             // Sum head and tail
             let sum_begin = processed;
+            let sum_end = processed + processing;
 
             // Sum: 1st tail block
             if !self.tail_precalculated0.is_empty() {
-                let precalculated_pos = self.precalculated_pos;
+                let mut precalculated_pos = self.precalculated_pos;
 
                 // Use IPP to add the tail block to output
                 unsafe {
@@ -791,6 +671,15 @@ impl Convolution for TwoStageFFTConvolver {
                         &mut output[sum_begin],
                         processing as i32,
                     );
+                    // ippsAddC_32f_I(
+                    //     std::slice::from_raw_parts(
+                    //         self.tail_precalculated0.as_ptr().add(precalculated_pos),
+                    //         processing,
+                    //     )
+                    //     .as_ptr(),
+                    //     output[sum_begin..sum_end].as_mut_ptr(),
+                    //     processing as i32,
+                    // );
                 }
             }
 
@@ -800,6 +689,15 @@ impl Convolution for TwoStageFFTConvolver {
 
                 // Use IPP to add the tail block to output
                 unsafe {
+                    // ippsAddC_32f_I(
+                    //     std::slice::from_raw_parts(
+                    //         self.tail_precalculated.as_ptr().add(precalculated_pos),
+                    //         processing,
+                    //     )
+                    //     .as_ptr(),
+                    //     output[sum_begin..sum_end].as_mut_ptr(),
+                    //     processing as i32,
+                    // );
                     ippsAdd_32f(
                         &self.tail_precalculated[precalculated_pos],
                         &output[sum_begin],
@@ -830,11 +728,7 @@ impl Convolution for TwoStageFFTConvolver {
                     &mut self.tail_output0[block_offset..block_offset + HEAD_BLOCK_SIZE],
                 );
                 if self.tail_input_fill == TAIL_BLOCK_SIZE {
-                    aligned_f32_swap(
-                        &mut self.tail_precalculated0,
-                        &mut self.tail_output0,
-                        &mut self.swap_buffer,
-                    );
+                    std::mem::swap(&mut self.tail_precalculated0, &mut self.tail_output0);
                 }
             }
 
@@ -843,11 +737,7 @@ impl Convolution for TwoStageFFTConvolver {
                 && self.tail_input_fill == TAIL_BLOCK_SIZE
                 && self.tail_output.len() == TAIL_BLOCK_SIZE
             {
-                aligned_f32_swap(
-                    &mut self.tail_precalculated,
-                    &mut self.tail_output,
-                    &mut self.swap_buffer,
-                );
+                std::mem::swap(&mut self.tail_precalculated, &mut self.tail_output);
                 self.tail_convolver
                     .process(&self.tail_input, &mut self.tail_output);
             }
@@ -859,45 +749,5 @@ impl Convolution for TwoStageFFTConvolver {
 
             processed += processing;
         }
-    }
-}
-
-impl Clone for TwoStageFFTConvolver {
-    fn clone(&self) -> Self {
-        let head_convolver = self.head_convolver.clone();
-        let tail_convolver0 = self.tail_convolver0.clone();
-        let tail_convolver = self.tail_convolver.clone();
-
-        let tail_output0 = clone_aligned_f32_buffer(&self.tail_output0);
-        let tail_precalculated0 = clone_aligned_f32_buffer(&self.tail_precalculated0);
-        let tail_output = clone_aligned_f32_buffer(&self.tail_output);
-        let tail_precalculated = clone_aligned_f32_buffer(&self.tail_precalculated);
-        let tail_input = clone_aligned_f32_buffer(&self.tail_input);
-        let swap_buffer = clone_aligned_f32_buffer(&self.swap_buffer);
-
-        Self {
-            head_convolver,
-            tail_convolver0,
-            tail_output0,
-            tail_precalculated0,
-            tail_convolver,
-            tail_output,
-            tail_precalculated,
-            tail_input,
-            tail_input_fill: self.tail_input_fill,
-            precalculated_pos: self.precalculated_pos,
-            swap_buffer,
-        }
-    }
-}
-
-impl Drop for TwoStageFFTConvolver {
-    fn drop(&mut self) {
-        drop_aligned_buffer(&mut self.tail_output0);
-        drop_aligned_buffer(&mut self.tail_precalculated0);
-        drop_aligned_buffer(&mut self.tail_output);
-        drop_aligned_buffer(&mut self.tail_precalculated);
-        drop_aligned_buffer(&mut self.tail_input);
-        drop_aligned_buffer(&mut self.swap_buffer);
     }
 }
