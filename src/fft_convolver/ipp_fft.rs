@@ -492,16 +492,18 @@ pub struct TwoStageFFTConvolver {
     tail_input: Vec<Sample>,
     tail_input_fill: usize,
     precalculated_pos: usize,
+    head_block_size: usize,
+    tail_block_size: usize,
 }
 
-const HEAD_BLOCK_SIZE: usize = 128;
-const TAIL_BLOCK_SIZE: usize = 1024;
-
-impl Convolution for TwoStageFFTConvolver {
-    fn init(impulse_response: &[Sample], _block_size: usize, max_response_length: usize) -> Self {
-        let head_block_size = HEAD_BLOCK_SIZE;
-        let tail_block_size = TAIL_BLOCK_SIZE;
-
+impl TwoStageFFTConvolver {
+    pub fn init(
+        impulse_response: &[Sample],
+        _block_size: usize,
+        max_response_length: usize,
+        head_block_size: usize,
+        tail_block_size: usize,
+    ) -> Self {
         if max_response_length < impulse_response.len() {
             panic!(
                 "max_response_length must be at least the length of the initial impulse response"
@@ -560,14 +562,19 @@ impl Convolution for TwoStageFFTConvolver {
             tail_input,
             tail_input_fill,
             precalculated_pos,
+            head_block_size,
+            tail_block_size,
         }
     }
 
-    fn update(&mut self, _response: &[Sample]) {
+    pub fn update(&mut self, _response: &[Sample]) {
         todo!()
     }
 
-    fn process(&mut self, input: &[Sample], output: &mut [Sample]) {
+    pub fn process(&mut self, input: &[Sample], output: &mut [Sample]) {
+        let head_block_size = self.head_block_size;
+        let tail_block_size = self.tail_block_size;
+
         // Head
         self.head_convolver.process(input, output);
 
@@ -583,7 +590,7 @@ impl Convolution for TwoStageFFTConvolver {
             let remaining = len - processed;
             let processing = std::cmp::min(
                 remaining,
-                HEAD_BLOCK_SIZE - (self.tail_input_fill % HEAD_BLOCK_SIZE),
+                head_block_size - (self.tail_input_fill % head_block_size),
             );
 
             // Sum head and tail
@@ -628,29 +635,29 @@ impl Convolution for TwoStageFFTConvolver {
             self.tail_input_fill += processing;
 
             // Convolution: 1st tail block
-            if !self.tail_precalculated0.is_empty() && self.tail_input_fill % HEAD_BLOCK_SIZE == 0 {
-                assert!(self.tail_input_fill >= HEAD_BLOCK_SIZE);
-                let block_offset = self.tail_input_fill - HEAD_BLOCK_SIZE;
+            if !self.tail_precalculated0.is_empty() && self.tail_input_fill % head_block_size == 0 {
+                assert!(self.tail_input_fill >= head_block_size);
+                let block_offset = self.tail_input_fill - head_block_size;
                 self.tail_convolver0.process(
-                    &self.tail_input[block_offset..block_offset + HEAD_BLOCK_SIZE],
-                    &mut self.tail_output0[block_offset..block_offset + HEAD_BLOCK_SIZE],
+                    &self.tail_input[block_offset..block_offset + head_block_size],
+                    &mut self.tail_output0[block_offset..block_offset + head_block_size],
                 );
-                if self.tail_input_fill == TAIL_BLOCK_SIZE {
+                if self.tail_input_fill == tail_block_size {
                     std::mem::swap(&mut self.tail_precalculated0, &mut self.tail_output0);
                 }
             }
 
             // Convolution: 2nd-Nth tail block (might be done in some background thread)
             if !self.tail_precalculated.is_empty()
-                && self.tail_input_fill == TAIL_BLOCK_SIZE
-                && self.tail_output.len() == TAIL_BLOCK_SIZE
+                && self.tail_input_fill == tail_block_size
+                && self.tail_output.len() == tail_block_size
             {
                 std::mem::swap(&mut self.tail_precalculated, &mut self.tail_output);
                 self.tail_convolver
                     .process(&self.tail_input, &mut self.tail_output);
             }
 
-            if self.tail_input_fill == TAIL_BLOCK_SIZE {
+            if self.tail_input_fill == tail_block_size {
                 self.tail_input_fill = 0;
                 self.precalculated_pos = 0;
             }
