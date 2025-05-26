@@ -1,4 +1,4 @@
-use crate::{Convolution, Sample};
+use crate::{fft_convolver::FftBackend, Convolution, Sample};
 use ipp_sys::*;
 use num_complex::Complex32;
 
@@ -34,14 +34,10 @@ impl Clone for Fft {
     }
 }
 
-impl Fft {
-    pub fn new(size: usize) -> Self {
-        let mut fft = Self::default();
-        fft.init(size);
-        fft
-    }
+impl FftBackend for Fft {
+    type Complex = Complex32;
 
-    pub fn init(&mut self, size: usize) {
+    fn init(&mut self, size: usize) {
         assert!(size > 0, "FFT size must be greater than 0");
         assert!(size.is_power_of_two(), "FFT size must be a power of 2");
 
@@ -79,13 +75,13 @@ impl Fft {
         self.scratch_buffer = scratch_buffer;
     }
 
-    pub fn forward(
+    fn forward(
         &mut self,
         input: &mut [f32],
-        output: &mut [Complex32],
-    ) -> Result<(), &'static str> {
+        output: &mut [Self::Complex],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if self.size == 0 {
-            return Err("FFT not initialized");
+            return Err("FFT not initialized".into());
         }
 
         assert_eq!(input.len(), self.size, "Input length must match FFT size");
@@ -107,13 +103,13 @@ impl Fft {
         Ok(())
     }
 
-    pub fn inverse(
+    fn inverse(
         &mut self,
-        input: &mut [Complex32],
+        input: &mut [Self::Complex],
         output: &mut [f32],
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if self.size == 0 {
-            return Err("FFT not initialized");
+            return Err("FFT not initialized".into());
         }
 
         assert_eq!(
@@ -203,466 +199,9 @@ pub fn sum(result: &mut [f32], a: &[f32], b: &[f32]) {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct FFTConvolver {
-    ir_len: usize,
-    block_size: usize,
-    _seg_size: usize,
-    seg_count: usize,
-    active_seg_count: usize,
-    _fft_complex_size: usize,
-    segments: Vec<Vec<Complex32>>,
-    segments_ir: Vec<Vec<Complex32>>,
-    fft_buffer: Vec<f32>,
-    fft: Fft,
-    pre_multiplied: Vec<Complex32>,
-    conv: Vec<Complex32>,
-    overlap: Vec<f32>,
-    current: usize,
-    input_buffer: Vec<f32>,
-    input_buffer_fill: usize,
-    temp_buffer: Vec<Complex32>,
-}
-
-impl Convolution for FFTConvolver {
-    fn init(impulse_response: &[Sample], block_size: usize, max_response_length: usize) -> Self {
-        if max_response_length < impulse_response.len() {
-            panic!(
-                "max_response_length must be at least the length of the initial impulse response"
-            );
-        }
-        let mut padded_ir = impulse_response.to_vec();
-        padded_ir.resize(max_response_length, 0.);
-        let ir_len = padded_ir.len();
-
-        let block_size = block_size.next_power_of_two();
-        let seg_size = 2 * block_size;
-        let seg_count = (ir_len as f64 / block_size as f64).ceil() as usize;
-        let active_seg_count = seg_count;
-        let fft_complex_size = complex_size(seg_size);
-
-        // FFT
-        let mut fft = Fft::default();
-        fft.init(seg_size);
-        let mut fft_buffer = vec![0.; seg_size];
-
-        // prepare segments
-        let mut segments = Vec::new();
-        for _ in 0..seg_count {
-            segments.push(vec![Complex32::new(0., 0.); fft_complex_size]);
-        }
-
-        let mut segments_ir = Vec::new();
-
-        // prepare ir
-        for i in 0..seg_count {
-            let mut segment = vec![Complex32::new(0., 0.); fft_complex_size];
-            let remaining = ir_len - (i * block_size);
-            let size_copy = if remaining >= block_size {
-                block_size
-            } else {
-                remaining
-            };
-            copy_and_pad(&mut fft_buffer, &padded_ir[i * block_size..], size_copy);
-            fft.forward(&mut fft_buffer, &mut segment).unwrap();
-            segments_ir.push(segment);
-        }
-
-        // prepare convolution buffers
-        let pre_multiplied = vec![Complex32::new(0., 0.); fft_complex_size];
-        let conv = vec![Complex32::new(0., 0.); fft_complex_size];
-        let overlap = vec![0.; block_size];
-
-        // prepare input buffer
-        let input_buffer = vec![0.; block_size];
-        let input_buffer_fill = 0;
-
-        // reset current position
-        let current = 0;
-        let temp_buffer = vec![Complex32::new(0.0, 0.0); fft_complex_size];
-
-        Self {
-            ir_len,
-            block_size,
-            _seg_size: seg_size,
-            seg_count,
-            active_seg_count,
-            _fft_complex_size: fft_complex_size,
-            segments,
-            segments_ir,
-            fft_buffer,
-            fft,
-            pre_multiplied,
-            conv,
-            overlap,
-            current,
-            input_buffer,
-            input_buffer_fill,
-            temp_buffer,
-        }
-    }
-
-    fn update(&mut self, response: &[Sample]) {
-        let new_ir_len = response.len();
-
-        if new_ir_len > self.ir_len {
-            panic!("New impulse response is longer than initialized length");
-        }
-
-        if self.ir_len == 0 {
-            return;
-        }
-
-        unsafe {
-            // Zero out buffers
-            ippsZero_32f(self.fft_buffer.as_mut_ptr(), self.fft_buffer.len() as i32);
-            ippsZero_32fc(
-                self.conv.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-                self.conv.len() as i32,
-            );
-            ippsZero_32fc(
-                self.pre_multiplied.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-                self.pre_multiplied.len() as i32,
-            );
-            ippsZero_32f(self.overlap.as_mut_ptr(), self.overlap.len() as i32);
-        }
-
-        self.active_seg_count = ((new_ir_len as f64 / self.block_size as f64).ceil()) as usize;
-
-        // Prepare IR
-        for i in 0..self.active_seg_count {
-            let segment = &mut self.segments_ir[i];
-            let remaining = new_ir_len - (i * self.block_size);
-            let size_copy = if remaining >= self.block_size {
-                self.block_size
-            } else {
-                remaining
-            };
-            copy_and_pad(
-                &mut self.fft_buffer,
-                &response[i * self.block_size..],
-                size_copy,
-            );
-            self.fft.forward(&mut self.fft_buffer, segment).unwrap();
-        }
-
-        // Clear remaining segments
-        for i in self.active_seg_count..self.seg_count {
-            unsafe {
-                ippsZero_32fc(
-                    self.segments_ir[i].as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-                    self.segments_ir[i].len() as i32,
-                );
-            }
-        }
-    }
-
-    fn process(&mut self, input: &[Sample], output: &mut [Sample]) {
-        if self.active_seg_count == 0 {
-            unsafe {
-                ippsZero_32f(output.as_mut_ptr(), output.len() as i32);
-            }
-            return;
-        }
-
-        let mut processed = 0;
-        while processed < output.len() {
-            let input_buffer_was_empty = self.input_buffer_fill == 0;
-            let processing = std::cmp::min(
-                output.len() - processed,
-                self.block_size - self.input_buffer_fill,
-            );
-
-            // Copy input to input buffer
-            let input_buffer_pos = self.input_buffer_fill;
-            unsafe {
-                ippsCopy_32f(
-                    &input[processed],
-                    &mut self.input_buffer[input_buffer_pos],
-                    processing as i32,
-                );
-            }
-
-            // Forward FFT
-            copy_and_pad(&mut self.fft_buffer, &self.input_buffer, self.block_size);
-            if let Err(_) = self
-                .fft
-                .forward(&mut self.fft_buffer, &mut self.segments[self.current])
-            {
-                unsafe {
-                    ippsZero_32f(output.as_mut_ptr(), output.len() as i32);
-                }
-                return;
-            }
-
-            // Complex multiplication
-            if input_buffer_was_empty {
-                unsafe {
-                    ippsZero_32fc(
-                        self.pre_multiplied.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-                        self.pre_multiplied.len() as i32,
-                    );
-                }
-
-                for i in 1..self.active_seg_count {
-                    let index_ir = i;
-                    let index_audio = (self.current + i) % self.active_seg_count;
-                    complex_multiply_accumulate(
-                        &mut self.pre_multiplied,
-                        &self.segments_ir[index_ir],
-                        &self.segments[index_audio],
-                        &mut self.temp_buffer,
-                    );
-                }
-            }
-
-            // Copy pre-multiplied to conv
-            unsafe {
-                ippsCopy_32fc(
-                    self.pre_multiplied.as_ptr() as *const ipp_sys::Ipp32fc,
-                    self.conv.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-                    self.conv.len() as i32,
-                );
-            }
-
-            complex_multiply_accumulate(
-                &mut self.conv,
-                &self.segments[self.current],
-                &self.segments_ir[0],
-                &mut self.temp_buffer,
-            );
-
-            // Backward FFT
-            if let Err(_) = self.fft.inverse(&mut self.conv, &mut self.fft_buffer) {
-                unsafe {
-                    ippsZero_32f(output.as_mut_ptr(), output.len() as i32);
-                }
-                return;
-            }
-
-            // Add overlap
-            sum(
-                &mut output[processed..processed + processing],
-                &self.fft_buffer[input_buffer_pos..input_buffer_pos + processing],
-                &self.overlap[input_buffer_pos..input_buffer_pos + processing],
-            );
-
-            // Input buffer full => Next block
-            self.input_buffer_fill += processing;
-            if self.input_buffer_fill == self.block_size {
-                // Input buffer is empty again now
-                unsafe {
-                    ippsZero_32f(
-                        self.input_buffer.as_mut_ptr(),
-                        self.input_buffer.len() as i32,
-                    );
-                }
-                self.input_buffer_fill = 0;
-
-                // Save the overlap
-                unsafe {
-                    ippsCopy_32f(
-                        &self.fft_buffer[self.block_size],
-                        self.overlap.as_mut_ptr(),
-                        self.block_size as i32,
-                    );
-                }
-
-                // Update the current segment
-                self.current = if self.current > 0 {
-                    self.current - 1
-                } else {
-                    self.active_seg_count - 1
-                };
-            }
-            processed += processing;
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct TwoStageFFTConvolver {
-    head_convolver: FFTConvolver,
-    tail_convolver0: FFTConvolver,
-    tail_output0: Vec<Sample>,
-    tail_precalculated0: Vec<Sample>,
-    tail_convolver: FFTConvolver,
-    tail_output: Vec<Sample>,
-    tail_precalculated: Vec<Sample>,
-    tail_input: Vec<Sample>,
-    tail_input_fill: usize,
-    precalculated_pos: usize,
-    head_block_size: usize,
-    tail_block_size: usize,
-}
-
-impl TwoStageFFTConvolver {
-    pub fn init(
-        impulse_response: &[Sample],
-        _block_size: usize,
-        max_response_length: usize,
-        head_block_size: usize,
-        tail_block_size: usize,
-    ) -> Self {
-        if max_response_length < impulse_response.len() {
-            panic!(
-                "max_response_length must be at least the length of the initial impulse response"
-            );
-        }
-        let mut padded_ir = impulse_response.to_vec();
-        padded_ir.resize(max_response_length, 0.);
-
-        let head_ir_len = std::cmp::min(max_response_length, tail_block_size);
-        let head_convolver = FFTConvolver::init(
-            &padded_ir[0..head_ir_len],
-            head_block_size,
-            max_response_length,
-        );
-
-        let tail_convolver0 = (max_response_length > tail_block_size)
-            .then(|| {
-                let tail_ir_len =
-                    std::cmp::min(max_response_length - tail_block_size, tail_block_size);
-                FFTConvolver::init(
-                    &padded_ir[tail_block_size..tail_block_size + tail_ir_len],
-                    head_block_size,
-                    max_response_length,
-                )
-            })
-            .unwrap_or_default();
-
-        let tail_output0 = vec![0.0; tail_block_size];
-        let tail_precalculated0 = vec![0.0; tail_block_size];
-
-        let tail_convolver = (max_response_length > 2 * tail_block_size)
-            .then(|| {
-                let tail_ir_len = max_response_length - 2 * tail_block_size;
-                FFTConvolver::init(
-                    &padded_ir[2 * tail_block_size..2 * tail_block_size + tail_ir_len],
-                    tail_block_size,
-                    max_response_length,
-                )
-            })
-            .unwrap_or_default();
-
-        let tail_output = vec![0.0; tail_block_size];
-        let tail_precalculated = vec![0.0; tail_block_size];
-        let tail_input = vec![0.0; tail_block_size];
-        let tail_input_fill = 0;
-        let precalculated_pos = 0;
-
-        TwoStageFFTConvolver {
-            head_convolver,
-            tail_convolver0,
-            tail_output0,
-            tail_precalculated0,
-            tail_convolver,
-            tail_output,
-            tail_precalculated,
-            tail_input,
-            tail_input_fill,
-            precalculated_pos,
-            head_block_size,
-            tail_block_size,
-        }
-    }
-
-    pub fn update(&mut self, _response: &[Sample]) {
-        todo!()
-    }
-
-    pub fn process(&mut self, input: &[Sample], output: &mut [Sample]) {
-        let head_block_size = self.head_block_size;
-        let tail_block_size = self.tail_block_size;
-
-        // Head
-        self.head_convolver.process(input, output);
-
-        // Tail
-        if self.tail_input.is_empty() {
-            return;
-        }
-
-        let len = input.len();
-        let mut processed = 0;
-
-        while processed < len {
-            let remaining = len - processed;
-            let processing = std::cmp::min(
-                remaining,
-                head_block_size - (self.tail_input_fill % head_block_size),
-            );
-
-            // Sum head and tail
-            let sum_begin = processed;
-
-            // Sum: 1st tail block
-            if !self.tail_precalculated0.is_empty() {
-                // Use IPP to add the tail block to output
-                unsafe {
-                    ippsAdd_32f(
-                        &self.tail_precalculated0[self.precalculated_pos],
-                        &output[sum_begin],
-                        &mut output[sum_begin],
-                        processing as i32,
-                    );
-                }
-            }
-
-            // Sum: 2nd-Nth tail block
-            if !self.tail_precalculated.is_empty() {
-                // Use IPP to add the tail block to output
-                unsafe {
-                    ippsAdd_32f(
-                        &self.tail_precalculated[self.precalculated_pos],
-                        &output[sum_begin],
-                        &mut output[sum_begin],
-                        processing as i32,
-                    );
-                }
-            }
-
-            self.precalculated_pos += processing;
-
-            // Fill input buffer for tail convolution
-            unsafe {
-                ippsCopy_32f(
-                    &input[processed],
-                    &mut self.tail_input[self.tail_input_fill],
-                    processing as i32,
-                );
-            }
-            self.tail_input_fill += processing;
-
-            // Convolution: 1st tail block
-            if !self.tail_precalculated0.is_empty() && self.tail_input_fill % head_block_size == 0 {
-                assert!(self.tail_input_fill >= head_block_size);
-                let block_offset = self.tail_input_fill - head_block_size;
-                self.tail_convolver0.process(
-                    &self.tail_input[block_offset..block_offset + head_block_size],
-                    &mut self.tail_output0[block_offset..block_offset + head_block_size],
-                );
-                if self.tail_input_fill == tail_block_size {
-                    std::mem::swap(&mut self.tail_precalculated0, &mut self.tail_output0);
-                }
-            }
-
-            // Convolution: 2nd-Nth tail block (might be done in some background thread)
-            if !self.tail_precalculated.is_empty()
-                && self.tail_input_fill == tail_block_size
-                && self.tail_output.len() == tail_block_size
-            {
-                std::mem::swap(&mut self.tail_precalculated, &mut self.tail_output);
-                self.tail_convolver
-                    .process(&self.tail_input, &mut self.tail_output);
-            }
-
-            if self.tail_input_fill == tail_block_size {
-                self.tail_input_fill = 0;
-                self.precalculated_pos = 0;
-            }
-
-            processed += processing;
-        }
-    }
-}
+pub type FFTConvolver =
+    crate::fft_convolver::GenericFFTConvolver<Fft, crate::fft_convolver::ipp_ops::IppComplexOps>;
+pub type TwoStageFFTConvolver = crate::fft_convolver::GenericTwoStageFFTConvolver<
+    Fft,
+    crate::fft_convolver::ipp_ops::IppComplexOps,
+>;

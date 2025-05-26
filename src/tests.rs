@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::crossfade_convolver::CrossfadeConvolver;
-    use crate::fft_convolver::FFTConvolver;
+    use crate::fft_convolver::{FFTConvolver, TwoStageFFTConvolver};
     use crate::{Convolution, Sample};
 
     #[test]
@@ -30,6 +30,38 @@ mod tests {
                 gain * (2.0 * std::f32::consts::PI * frequency * i as Sample / sample_rate).sin();
         }
         signal
+    }
+
+    #[test]
+    fn two_stage_convolver_latency_test() {
+        let block_size = 32;
+        let input_size = block_size * 2;
+        let fir_size = 4096;
+        let mut response = vec![0.0; fir_size];
+        response[63] = 1.0;
+        let mut two_stage_convolver_1 =
+            TwoStageFFTConvolver::init(&response, block_size, fir_size, 64, 1024);
+        let mut two_stage_convolver_2 =
+            TwoStageFFTConvolver::init(&response, block_size, fir_size, 32, 1024);
+        let mut input = vec![0.0; input_size];
+        input[0] = 1.0;
+        let mut output_a = vec![0.0; input_size];
+        let mut output_b = vec![0.0; input_size];
+        let first_half_input = input[..block_size].as_ref();
+        let second_half_input = input[block_size..].as_ref();
+        let first_half_output_a = &mut output_a[..block_size];
+        let first_half_output_b = &mut output_b[..block_size];
+        two_stage_convolver_1.process(first_half_input, first_half_output_a);
+        two_stage_convolver_2.process(first_half_input, first_half_output_b);
+        let second_half_output_a = &mut output_a[block_size..];
+        let second_half_output_b = &mut output_b[block_size..];
+        two_stage_convolver_1.process(second_half_input, second_half_output_a);
+        two_stage_convolver_2.process(second_half_input, second_half_output_b);
+        for i in 0..output_a.len() {
+            assert!((output_a[i] - output_b[i]).abs() < 0.000001);
+        }
+        assert!((output_a[63] - 1.0).abs() < 0.000001);
+        assert!((output_b[63] - 1.0).abs() < 0.000001);
     }
 
     #[test]
