@@ -21,12 +21,12 @@ dependencies = [
 [[package]]
 name = "ipp-headers-sys"
 version = "0.4.5"
-source = "git+ssh://git@github.com/holoplot/ipp-sys.git?branch=dan%2Fgenerate-2022-bindings#3e69ca21c1e24b141ab225a743910d999e591a4c"
+source = "git+ssh://git@github.com/holoplot/ipp-sys.git?rev=3e69ca21c1e24b141ab225a743910d999e591a4c#3e69ca21c1e24b141ab225a743910d999e591a4c"
 
 [[package]]
 name = "ipp-sys"
 version = "0.4.5"
-source = "git+ssh://git@github.com/holoplot/ipp-sys.git?branch=dan%2Fgenerate-2022-bindings#3e69ca21c1e24b141ab225a743910d999e591a4c"
+source = "git+ssh://git@github.com/holoplot/ipp-sys.git?rev=3e69ca21c1e24b141ab225a743910d999e591a4c#3e69ca21c1e24b141ab225a743910d999e591a4c"
 dependencies = [
  "ipp-headers-sys",
  "link-ippcore",
@@ -39,12 +39,12 @@ dependencies = [
 [[package]]
 name = "ipp-sys-build-help"
 version = "0.1.2"
-source = "git+ssh://git@github.com/holoplot/ipp-sys.git?branch=dan%2Fgenerate-2022-bindings#3e69ca21c1e24b141ab225a743910d999e591a4c"
+source = "git+ssh://git@github.com/holoplot/ipp-sys.git?rev=3e69ca21c1e24b141ab225a743910d999e591a4c#3e69ca21c1e24b141ab225a743910d999e591a4c"
 
 [[package]]
 name = "link-ippcore"
 version = "0.1.1"
-source = "git+ssh://git@github.com/holoplot/ipp-sys.git?branch=dan%2Fgenerate-2022-bindings#3e69ca21c1e24b141ab225a743910d999e591a4c"
+source = "git+ssh://git@github.com/holoplot/ipp-sys.git?rev=3e69ca21c1e24b141ab225a743910d999e591a4c#3e69ca21c1e24b141ab225a743910d999e591a4c"
 dependencies = [
  "ipp-sys-build-help",
 ]
@@ -52,7 +52,7 @@ dependencies = [
 [[package]]
 name = "link-ippcv"
 version = "0.1.2"
-source = "git+ssh://git@github.com/holoplot/ipp-sys.git?branch=dan%2Fgenerate-2022-bindings#3e69ca21c1e24b141ab225a743910d999e591a4c"
+source = "git+ssh://git@github.com/holoplot/ipp-sys.git?rev=3e69ca21c1e24b141ab225a743910d999e591a4c#3e69ca21c1e24b141ab225a743910d999e591a4c"
 dependencies = [
  "ipp-sys-build-help",
  "link-ippcore",
@@ -62,7 +62,7 @@ dependencies = [
 [[package]]
 name = "link-ippi"
 version = "0.1.2"
-source = "git+ssh://git@github.com/holoplot/ipp-sys.git?branch=dan%2Fgenerate-2022-bindings#3e69ca21c1e24b141ab225a743910d999e591a4c"
+source = "git+ssh://git@github.com/holoplot/ipp-sys.git?rev=3e69ca21c1e24b141ab225a743910d999e591a4c#3e69ca21c1e24b141ab225a743910d999e591a4c"
 dependencies = [
  "ipp-sys-build-help",
  "link-ippcore",
@@ -72,7 +72,7 @@ dependencies = [
 [[package]]
 name = "link-ipps"
 version = "0.1.2"
-source = "git+ssh://git@github.com/holoplot/ipp-sys.git?branch=dan%2Fgenerate-2022-bindings#3e69ca21c1e24b141ab225a743910d999e591a4c"
+source = "git+ssh://git@github.com/holoplot/ipp-sys.git?rev=3e69ca21c1e24b141ab225a743910d999e591a4c#3e69ca21c1e24b141ab225a743910d999e591a4c"
 dependencies = [
  "ipp-sys-build-help",
  "link-ippcore",
@@ -82,7 +82,7 @@ dependencies = [
 [[package]]
 name = "link-ippvm"
 version = "0.1.0"
-source = "git+ssh://git@github.com/holoplot/ipp-sys.git?branch=dan%2Fgenerate-2022-bindings#3e69ca21c1e24b141ab225a743910d999e591a4c"
+source = "git+ssh://git@github.com/holoplot/ipp-sys.git?rev=3e69ca21c1e24b141ab225a743910d999e591a4c#3e69ca21c1e24b141ab225a743910d999e591a4c"
 dependencies = [
  "ipp-sys-build-help",
  "link-ippcore",

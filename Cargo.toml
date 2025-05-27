@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 realfft = "3.3.0"
 rustfft = "6.1.0"
-ipp-sys = { git = "ssh://git@github.com/holoplot/ipp-sys.git", branch = "dan/generate-2022-bindings", features = ["2022"], optional = true  }
+ipp-sys = { git = "ssh://git@github.com/holoplot/ipp-sys.git", rev = "3e69ca21c1e24b141ab225a743910d999e591a4c", features = ["2022"], optional = true  }
 num-complex = "0.4.6"
 
 [features]
