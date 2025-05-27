@@ -1,4 +1,7 @@
-use crate::{fft_convolver::FftBackend, Convolution, Sample};
+use crate::{
+    fft_convolver::{ComplexOps, FftBackend},
+    Convolution, Sample,
+};
 use ipp_sys::*;
 use num_complex::Complex32;
 
@@ -137,71 +140,106 @@ impl FftBackend for Fft {
     }
 }
 
-pub fn complex_size(size: usize) -> usize {
-    (size / 2) + 1
-}
+#[derive(Clone, Default)]
+pub struct IppComplexOps;
 
-pub fn copy_and_pad(dst: &mut [f32], src: &[f32], src_size: usize) {
-    assert!(dst.len() >= src_size, "Destination buffer too small");
+impl ComplexOps for IppComplexOps {
+    type Complex = Complex32;
+    fn complex_size(size: usize) -> usize {
+        (size / 2) + 1
+    }
 
-    unsafe {
-        ippsCopy_32f(src.as_ptr(), dst.as_mut_ptr(), src_size as i32);
+    fn copy_and_pad(dst: &mut [f32], src: &[f32], src_size: usize) {
+        assert!(dst.len() >= src_size, "Destination buffer too small");
 
-        if dst.len() > src_size {
-            ippsZero_32f(
-                dst.as_mut_ptr().add(src_size),
-                (dst.len() - src_size) as i32,
+        unsafe {
+            ippsCopy_32f(src.as_ptr(), dst.as_mut_ptr(), src_size as i32);
+
+            if dst.len() > src_size {
+                ippsZero_32f(
+                    dst.as_mut_ptr().add(src_size),
+                    (dst.len() - src_size) as i32,
+                );
+            }
+        }
+    }
+
+    fn complex_multiply_accumulate(
+        result: &mut [Self::Complex],
+        a: &[Self::Complex],
+        b: &[Self::Complex],
+        temp_buffer: Option<&mut [Self::Complex]>,
+    ) {
+        let temp_buffer = temp_buffer.expect("IPP implementation requires a temp buffer");
+        assert_eq!(result.len(), a.len());
+        assert_eq!(result.len(), b.len());
+        assert_eq!(temp_buffer.len(), a.len());
+
+        unsafe {
+            let len = result.len() as i32;
+
+            ippsMul_32fc(
+                a.as_ptr() as *const ipp_sys::Ipp32fc,
+                b.as_ptr() as *const ipp_sys::Ipp32fc,
+                temp_buffer.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
+                len,
             );
+
+            ippsAdd_32fc(
+                temp_buffer.as_ptr() as *const ipp_sys::Ipp32fc,
+                result.as_ptr() as *const ipp_sys::Ipp32fc,
+                result.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
+                len,
+            );
+        }
+    }
+
+    fn sum(result: &mut [f32], a: &[f32], b: &[f32]) {
+        assert_eq!(result.len(), a.len());
+        assert_eq!(result.len(), b.len());
+
+        unsafe {
+            ippsAdd_32f(
+                a.as_ptr(),
+                b.as_ptr(),
+                result.as_mut_ptr(),
+                result.len() as i32,
+            );
+        }
+    }
+
+    fn zero_complex(buffer: &mut [Self::Complex]) {
+        unsafe {
+            ippsZero_32fc(
+                buffer.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
+                buffer.len() as i32,
+            );
+        }
+    }
+
+    fn zero_real(buffer: &mut [f32]) {
+        unsafe {
+            ippsZero_32f(buffer.as_mut_ptr(), buffer.len() as i32);
+        }
+    }
+
+    fn copy_complex(dst: &mut [Self::Complex], src: &[Self::Complex]) {
+        unsafe {
+            ippsCopy_32fc(
+                src.as_ptr() as *const ipp_sys::Ipp32fc,
+                dst.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
+                dst.len() as i32,
+            );
+        }
+    }
+
+    fn add_to_buffer(dst: &mut [f32], src: &[f32]) {
+        unsafe {
+            ippsAdd_32f_I(src.as_ptr(), dst.as_mut_ptr(), dst.len() as i32);
         }
     }
 }
 
-pub fn complex_multiply_accumulate(
-    result: &mut [Complex32],
-    a: &[Complex32],
-    b: &[Complex32],
-    temp_buffer: &mut [Complex32],
-) {
-    assert_eq!(result.len(), a.len());
-    assert_eq!(result.len(), b.len());
-    assert_eq!(temp_buffer.len(), a.len());
-
-    unsafe {
-        let len = result.len() as i32;
-
-        ippsMul_32fc(
-            a.as_ptr() as *const ipp_sys::Ipp32fc,
-            b.as_ptr() as *const ipp_sys::Ipp32fc,
-            temp_buffer.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-            len,
-        );
-
-        ippsAdd_32fc(
-            temp_buffer.as_ptr() as *const ipp_sys::Ipp32fc,
-            result.as_ptr() as *const ipp_sys::Ipp32fc,
-            result.as_mut_ptr() as *mut ipp_sys::Ipp32fc,
-            len,
-        );
-    }
-}
-
-pub fn sum(result: &mut [f32], a: &[f32], b: &[f32]) {
-    assert_eq!(result.len(), a.len());
-    assert_eq!(result.len(), b.len());
-
-    unsafe {
-        ippsAdd_32f(
-            a.as_ptr(),
-            b.as_ptr(),
-            result.as_mut_ptr(),
-            result.len() as i32,
-        );
-    }
-}
-
-pub type FFTConvolver =
-    crate::fft_convolver::GenericFFTConvolver<Fft, crate::fft_convolver::ipp_ops::IppComplexOps>;
-pub type TwoStageFFTConvolver = crate::fft_convolver::GenericTwoStageFFTConvolver<
-    Fft,
-    crate::fft_convolver::ipp_ops::IppComplexOps,
->;
+pub type FFTConvolver = crate::fft_convolver::GenericFFTConvolver<Fft, IppComplexOps>;
+pub type TwoStageFFTConvolver =
+    crate::fft_convolver::two_stage_convolver::GenericTwoStageFFTConvolver<Fft, IppComplexOps>;
