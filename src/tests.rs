@@ -33,16 +33,16 @@ mod tests {
     }
 
     #[test]
-    fn two_stage_convolver_latency_test() {
+    fn two_stage_convolver_head_tail_sizes_test() {
         let block_size = 32;
         let input_size = block_size * 2;
         let fir_size = 4096;
         let mut response = vec![0.0; fir_size];
         response[63] = 1.0;
         let mut two_stage_convolver_1 =
-            TwoStageFFTConvolver::init(&response, block_size, fir_size, 64, 1024);
+            TwoStageFFTConvolver::with_sizes(&response, block_size, fir_size, 64, 1024);
         let mut two_stage_convolver_2 =
-            TwoStageFFTConvolver::init(&response, block_size, fir_size, 32, 1024);
+            TwoStageFFTConvolver::with_sizes(&response, block_size, fir_size, 32, 1024);
         let mut input = vec![0.0; input_size];
         input[0] = 1.0;
         let mut output_a = vec![0.0; input_size];

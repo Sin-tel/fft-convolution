@@ -2,6 +2,9 @@ use crate::fft_convolver::fft_convolver::GenericFFTConvolver;
 use crate::fft_convolver::traits::{ComplexOps, FftBackend};
 use crate::Convolution;
 
+const DEFAULT_HEAD_BLOCK_SIZE: usize = 128;
+const DEFAULT_TAIL_BLOCK_SIZE: usize = 1024;
+
 #[derive(Clone)]
 pub struct GenericTwoStageFFTConvolver<F: FftBackend, C: ComplexOps<Complex = F::Complex>>
 where
@@ -29,7 +32,7 @@ where
     F: Default,
     F::Complex: Clone + Default,
 {
-    pub fn init(
+    pub fn with_sizes(
         impulse_response: &[f32],
         _block_size: usize,
         max_response_length: usize,
@@ -97,12 +100,30 @@ where
             tail_block_size,
         }
     }
+}
 
-    pub fn update(&mut self, _response: &[f32]) {
+impl<F: FftBackend, C: ComplexOps<Complex = F::Complex>> Convolution
+    for GenericTwoStageFFTConvolver<F, C>
+where
+    C: Default,
+    F: Default,
+    F::Complex: Clone + Default,
+{
+    fn init(impulse_response: &[f32], _block_size: usize, max_response_length: usize) -> Self {
+        Self::with_sizes(
+            impulse_response,
+            _block_size,
+            max_response_length,
+            DEFAULT_HEAD_BLOCK_SIZE,
+            DEFAULT_TAIL_BLOCK_SIZE,
+        )
+    }
+
+    fn update(&mut self, _response: &[f32]) {
         todo!()
     }
 
-    pub fn process(&mut self, input: &[f32], output: &mut [f32]) {
+    fn process(&mut self, input: &[f32], output: &mut [f32]) {
         let head_block_size = self.head_block_size;
         let tail_block_size = self.tail_block_size;
 
