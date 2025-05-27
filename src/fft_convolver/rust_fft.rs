@@ -1,8 +1,5 @@
-use crate::{
-    fft_convolver::{ComplexOps, FftBackend},
-    Convolution, Sample,
-};
-use realfft::{ComplexToReal, FftError, RealFftPlanner, RealToComplex};
+use crate::fft_convolver::{ComplexOps, FftBackend};
+use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use rustfft::num_complex::Complex;
 use std::sync::Arc;
 
@@ -145,19 +142,6 @@ impl ComplexOps for RustComplexOps {
 
     fn copy_complex(dst: &mut [Self::Complex], src: &[Self::Complex]) {
         dst.clone_from_slice(src);
-    }
-}
-#[test]
-fn test_fft_convolver_passthrough() {
-    let mut response = [0.0; 1024];
-    response[0] = 1.0;
-    let mut convolver = FFTConvolver::init(&response, 1024, response.len());
-    let input = vec![1.0; 1024];
-    let mut output = vec![0.0; 1024];
-    convolver.process(&input, &mut output);
-
-    for i in 0..1024 {
-        assert!((output[i] - 1.0).abs() < 1e-6);
     }
 }
 

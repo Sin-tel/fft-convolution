@@ -1,7 +1,4 @@
-use crate::{
-    fft_convolver::{ComplexOps, FftBackend},
-    Convolution, Sample,
-};
+use crate::fft_convolver::{ComplexOps, FftBackend};
 use ipp_sys::*;
 use num_complex::Complex32;
 
