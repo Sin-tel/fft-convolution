@@ -8,10 +8,9 @@ const SAMPLE_RATE: u32 = 44100;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let block_size = 64;
-    let n_blocks = 10000;
+    let n_blocks = 1000;
 
-    // let response_len = 128_000;
-    let response_len = 4_000;
+    let response_len = 128_000;
 
     let response = generate_sinusoid(response_len, 1000.0, SAMPLE_RATE, 0.1);
 
@@ -25,16 +24,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut block_b = vec![0.0; block_size];
 
     let input = generate_sinusoid(n_blocks * block_size, 1300.0, SAMPLE_RATE, 0.1);
-
-    // for i in 0..n_blocks {
-    //     let start = i * block_size;
-    //     let end = (i + 1) * block_size;
-    //     convolver_a.process(&input[start..end], &mut block_a);
-    //     convolver_b.process(&input[start..end], &mut block_b);
-
-    //     output_a[start..end].copy_from_slice(&block_a);
-    //     output_b[start..end].copy_from_slice(&block_b);
-    // }
 
     let time = std::time::Instant::now();
 
