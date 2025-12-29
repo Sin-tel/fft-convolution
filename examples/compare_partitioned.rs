@@ -1,7 +1,7 @@
 mod util;
 
-use convolution::Convolution;
-use convolution::fft_convolver::*;
+use fft_convolution::Convolution;
+use fft_convolution::fft_convolver::*;
 use util::*;
 
 const SAMPLE_RATE: u32 = 44100;

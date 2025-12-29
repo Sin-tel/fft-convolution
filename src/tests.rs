@@ -119,6 +119,7 @@ mod tests {
     #[test]
     fn block_size_equal() {
         let block_size = 128;
+        let num_input_blocks = 1000;
 
         let check_equal = |lhs: &[f32], rhs: &[f32]| {
             for j in 0..block_size {
@@ -134,7 +135,6 @@ mod tests {
         let mut output_a = vec![0.0; block_size];
         let mut output_b = vec![0.0; block_size];
 
-        let num_input_blocks = 16;
         let input = generate_sinusoid(num_input_blocks * block_size, 1300.0, SAMPLE_RATE, 0.1);
 
         for i in 0..num_input_blocks {
@@ -148,6 +148,7 @@ mod tests {
     #[test]
     fn twostage_equal() {
         let block_size = 64;
+        let num_input_blocks = 1000;
 
         let check_equal = |lhs: &[f32], rhs: &[f32]| {
             for j in 0..block_size {
@@ -163,7 +164,6 @@ mod tests {
         let mut output_a = vec![0.0; block_size];
         let mut output_b = vec![0.0; block_size];
 
-        let num_input_blocks = 16;
         let input = generate_sinusoid(num_input_blocks * block_size, 1300.0, SAMPLE_RATE, 0.1);
 
         for i in 0..num_input_blocks {
