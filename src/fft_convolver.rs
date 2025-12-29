@@ -2,7 +2,7 @@ use realfft::{ComplexToReal, FftError, RealFftPlanner, RealToComplex};
 use rustfft::num_complex::Complex;
 use std::sync::Arc;
 
-use crate::{Convolution, Sample};
+use crate::Convolution;
 
 #[derive(Clone)]
 pub struct Fft {
@@ -120,7 +120,7 @@ pub struct FFTConvolver {
 }
 
 impl Convolution for FFTConvolver {
-    fn init(impulse_response: &[Sample], block_size: usize, max_response_length: usize) -> Self {
+    fn init(impulse_response: &[f32], block_size: usize, max_response_length: usize) -> Self {
         if max_response_length < impulse_response.len() {
             panic!(
                 "max_response_length must be at least the length of the initial impulse response"
@@ -191,7 +191,7 @@ impl Convolution for FFTConvolver {
         }
     }
 
-    fn update(&mut self, response: &[Sample]) {
+    fn update(&mut self, response: &[f32]) {
         let new_ir_len = response.len();
 
         if new_ir_len > self.ir_len {
@@ -232,7 +232,7 @@ impl Convolution for FFTConvolver {
         }
     }
 
-    fn process(&mut self, input: &[Sample], output: &mut [Sample]) {
+    fn process(&mut self, input: &[f32], output: &mut [f32]) {
         if self.active_seg_count == 0 {
             output.fill(0.);
             return;
@@ -333,12 +333,12 @@ fn test_fft_convolver_passthrough() {
 pub struct TwoStageFFTConvolver {
     head_convolver: FFTConvolver,
     tail_convolver0: FFTConvolver,
-    tail_output0: Vec<Sample>,
-    tail_precalculated0: Vec<Sample>,
+    tail_output0: Vec<f32>,
+    tail_precalculated0: Vec<f32>,
     tail_convolver: FFTConvolver,
-    tail_output: Vec<Sample>,
-    tail_precalculated: Vec<Sample>,
-    tail_input: Vec<Sample>,
+    tail_output: Vec<f32>,
+    tail_precalculated: Vec<f32>,
+    tail_input: Vec<f32>,
     tail_input_fill: usize,
     precalculated_pos: usize,
 }
@@ -347,7 +347,7 @@ const HEAD_BLOCK_SIZE: usize = 128;
 const TAIL_BLOCK_SIZE: usize = 1024;
 
 impl Convolution for TwoStageFFTConvolver {
-    fn init(impulse_response: &[Sample], _block_size: usize, max_response_length: usize) -> Self {
+    fn init(impulse_response: &[f32], _block_size: usize, max_response_length: usize) -> Self {
         let head_block_size = HEAD_BLOCK_SIZE;
         let tail_block_size = TAIL_BLOCK_SIZE;
 
@@ -412,11 +412,11 @@ impl Convolution for TwoStageFFTConvolver {
         }
     }
 
-    fn update(&mut self, _response: &[Sample]) {
+    fn update(&mut self, _response: &[f32]) {
         todo!()
     }
 
-    fn process(&mut self, input: &[Sample], output: &mut [Sample]) {
+    fn process(&mut self, input: &[f32], output: &mut [f32]) {
         // Head
         self.head_convolver.process(input, output);
 

@@ -1,19 +1,14 @@
 #[cfg(test)]
 mod tests {
+    use crate::Convolution;
     use crate::crossfade_convolver::CrossfadeConvolver;
-    use crate::fft_convolver::FFTConvolver;
-    use crate::{Convolution, Sample};
+    use crate::fft_convolver::*;
 
-    fn generate_sinusoid(
-        length: usize,
-        frequency: f32,
-        sample_rate: f32,
-        gain: f32,
-    ) -> Vec<Sample> {
+    fn generate_sinusoid(length: usize, frequency: f32, sample_rate: f32, gain: f32) -> Vec<f32> {
         let mut signal = vec![0.0; length];
         for i in 0..length {
             signal[i] =
-                gain * (2.0 * std::f32::consts::PI * frequency * i as Sample / sample_rate).sin();
+                gain * (2.0 * std::f32::consts::PI * frequency * i as f32 / sample_rate).sin();
         }
         signal
     }
@@ -45,7 +40,7 @@ mod tests {
                 &mut output_update,
             );
 
-            let check_equal = |lhs: &[Sample], rhs: &[Sample]| {
+            let check_equal = |lhs: &[f32], rhs: &[f32]| {
                 for j in 0..block_size {
                     assert!((lhs[j] - rhs[j]).abs() < 1e-6);
                 }
@@ -89,7 +84,7 @@ mod tests {
                 &mut output_crossfade_convolver,
             );
 
-            let check_equal = |lhs: &[Sample], rhs: &[Sample]| {
+            let check_equal = |lhs: &[f32], rhs: &[f32]| {
                 for j in 0..block_size {
                     assert!((lhs[j] - rhs[j]).abs() < 1e-6);
                 }
