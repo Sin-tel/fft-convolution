@@ -8,9 +8,12 @@ const SAMPLE_RATE: u32 = 44100;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let block_size = 64;
-    let n_blocks = 1000;
+    let n_blocks = 10000;
 
-    let response = generate_sinusoid(65000, 1000.0, SAMPLE_RATE, 0.1);
+    // let response_len = 128_000;
+    let response_len = 4_000;
+
+    let response = generate_sinusoid(response_len, 1000.0, SAMPLE_RATE, 0.1);
 
     let mut convolver_a = FFTConvolver::init(&response, block_size, response.len());
     let mut convolver_b = TwoStageFFTConvolver::init(&response, block_size, response.len());
