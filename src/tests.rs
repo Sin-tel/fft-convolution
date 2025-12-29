@@ -173,4 +173,86 @@ mod tests {
             check_equal(&output_a, &output_b);
         }
     }
+
+    #[test]
+    fn reset_fftconvolver() {
+        let block_size = 64;
+        let n_blocks = 1000;
+
+        let check_equal = |lhs: &[f32], rhs: &[f32]| {
+            for j in 0..block_size {
+                assert!((lhs[j] - rhs[j]).abs() < 1e-5);
+            }
+        };
+
+        let response = generate_sinusoid(12000, 1000.0, SAMPLE_RATE, 0.1);
+
+        let mut convolver = FFTConvolver::init(&response, block_size, response.len());
+
+        let mut output_a = vec![0.0; block_size * n_blocks];
+        let mut output_b = vec![0.0; block_size * n_blocks];
+
+        let mut block = vec![0.0; block_size];
+
+        let input = generate_sinusoid(n_blocks * block_size, 1300.0, SAMPLE_RATE, 0.1);
+
+        for i in 0..n_blocks {
+            let start = i * block_size;
+            let end = (i + 1) * block_size;
+            convolver.process(&input[start..end], &mut block);
+            output_a[start..end].copy_from_slice(&block);
+        }
+
+        convolver.reset();
+
+        for i in 0..n_blocks {
+            let start = i * block_size;
+            let end = (i + 1) * block_size;
+            convolver.process(&input[start..end], &mut block);
+            output_b[start..end].copy_from_slice(&block);
+        }
+
+        check_equal(&output_a, &output_b);
+    }
+
+    #[test]
+    fn reset_twostagefftconvolver() {
+        let block_size = 64;
+        let n_blocks = 1000;
+
+        let check_equal = |lhs: &[f32], rhs: &[f32]| {
+            for j in 0..block_size {
+                assert!((lhs[j] - rhs[j]).abs() < 1e-5);
+            }
+        };
+
+        let response = generate_sinusoid(12000, 1000.0, SAMPLE_RATE, 0.1);
+
+        let mut convolver = TwoStageFFTConvolver::init(&response, block_size, response.len());
+
+        let mut output_a = vec![0.0; block_size * n_blocks];
+        let mut output_b = vec![0.0; block_size * n_blocks];
+
+        let mut block = vec![0.0; block_size];
+
+        let input = generate_sinusoid(n_blocks * block_size, 1300.0, SAMPLE_RATE, 0.1);
+
+        for i in 0..n_blocks {
+            let start = i * block_size;
+            let end = (i + 1) * block_size;
+            convolver.process(&input[start..end], &mut block);
+            output_a[start..end].copy_from_slice(&block);
+        }
+
+        convolver.reset();
+
+        for i in 0..n_blocks {
+            let start = i * block_size;
+            let end = (i + 1) * block_size;
+            convolver.process(&input[start..end], &mut block);
+            output_b[start..end].copy_from_slice(&block);
+        }
+
+        check_equal(&output_a, &output_b);
+    }
 }

@@ -76,6 +76,10 @@ impl<Convolver: Convolution> Convolution for CrossfadeConvolver<Convolver> {
             *sample = self.core.crossfader.mix(self.buffer_a[i], self.buffer_b[i]);
         }
     }
+
+    fn reset(&mut self) {
+        todo!()
+    }
 }
 
 impl<Convolver: Convolution> CrossfadeConvolver<Convolver> {

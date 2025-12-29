@@ -105,10 +105,8 @@ pub fn sum(result: &mut [f32], a: &[f32], b: &[f32]) {
 pub struct FFTConvolver {
     ir_len: usize,
     block_size: usize,
-    _seg_size: usize,
     seg_count: usize,
     active_seg_count: usize,
-    _fft_complex_size: usize,
     segments: Vec<Vec<Complex<f32>>>,
     segments_ir: Vec<Vec<Complex<f32>>>,
     fft_buffer: Vec<f32>,
@@ -176,10 +174,8 @@ impl Convolution for FFTConvolver {
         Self {
             ir_len,
             block_size,
-            _seg_size: seg_size,
             seg_count,
             active_seg_count,
-            _fft_complex_size: fft_complex_size,
             segments,
             segments_ir,
             fft_buffer,
@@ -315,6 +311,17 @@ impl Convolution for FFTConvolver {
             processed += processing;
         }
     }
+    fn reset(&mut self) {
+        self.overlap.fill(0.);
+        for s in &mut self.segments {
+            s.fill(Complex::new(0., 0.));
+        }
+        self.current = 0;
+        self.input_buffer.fill(0.);
+        self.pre_multiplied.fill(Complex::new(0., 0.));
+        self.conv.fill(Complex::new(0., 0.));
+        self.input_buffer_fill = 0;
+    }
 }
 
 #[test]
@@ -421,6 +428,9 @@ impl Convolution for TwoStageFFTConvolver {
     }
 
     fn process(&mut self, input: &[f32], output: &mut [f32]) {
+        // TODO: Not sure why this is necessary here but not for FFTConvolver
+        assert!(input.len() <= self.head_block_size);
+
         // Head
         self.head_convolver.process(input, output);
 
@@ -501,6 +511,22 @@ impl Convolution for TwoStageFFTConvolver {
             processed += processing;
         }
     }
+
+    fn reset(&mut self) {
+        self.head_convolver.reset();
+
+        self.tail_convolver0.reset();
+        self.tail_output0.fill(0.);
+        self.tail_precalculated0.fill(0.);
+
+        self.tail_convolver.reset();
+        self.tail_output.fill(0.);
+        self.tail_precalculated.fill(0.);
+
+        self.tail_input.fill(0.);
+        self.tail_input_fill = 0;
+        self.precalculated_pos = 0;
+    }
 }
 
 // FFT constant k, time relative to a multiply-add operation.
@@ -515,4 +541,18 @@ fn compute_tail_block_size(head_len: usize, response_len: usize) -> usize {
     let b = b.max(head_len as f32);
 
     usize::next_power_of_two(b as usize)
+}
+
+#[test]
+fn test_fft_twostage_convolver_passthrough() {
+    let mut response = [0.0; 1024];
+    response[0] = 1.0;
+    let mut convolver = TwoStageFFTConvolver::init(&response, 1024, response.len());
+    let input = vec![1.0; 1024];
+    let mut output = vec![0.0; 1024];
+    convolver.process(&input, &mut output);
+
+    for i in 0..1024 {
+        assert!((output[i] - 1.0).abs() < 1e-6);
+    }
 }

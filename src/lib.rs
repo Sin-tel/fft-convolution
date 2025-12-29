@@ -8,5 +8,7 @@ pub trait Convolution: Clone {
     // must be implemented in a real-time safe way, e.g. no heap allocations
     fn update(&mut self, response: &[f32]);
 
+    fn reset(&mut self);
+
     fn process(&mut self, input: &[f32], output: &mut [f32]);
 }
