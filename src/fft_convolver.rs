@@ -333,6 +333,7 @@ fn test_fft_convolver_passthrough() {
 
 #[derive(Clone)]
 pub struct TwoStageFFTConvolver {
+    head_block_size: usize,
     head_convolver: FFTConvolver,
     tail_convolver0: FFTConvolver,
     tail_output0: Vec<f32>,
@@ -345,13 +346,15 @@ pub struct TwoStageFFTConvolver {
     precalculated_pos: usize,
 }
 
-const HEAD_BLOCK_SIZE: usize = 128;
 const TAIL_BLOCK_SIZE: usize = 1024;
 
 impl Convolution for TwoStageFFTConvolver {
-    fn init(impulse_response: &[f32], _block_size: usize, max_response_length: usize) -> Self {
-        let head_block_size = HEAD_BLOCK_SIZE;
-        let tail_block_size = TAIL_BLOCK_SIZE;
+    fn init(impulse_response: &[f32], block_size: usize, max_response_length: usize) -> Self {
+        let head_block_size = block_size;
+        let tail_block_size = compute_tail_block_size(impulse_response.len());
+
+        dbg!(head_block_size);
+        dbg!(tail_block_size);
 
         if max_response_length < impulse_response.len() {
             panic!(
@@ -362,11 +365,8 @@ impl Convolution for TwoStageFFTConvolver {
         padded_ir.resize(max_response_length, 0.);
 
         let head_ir_len = std::cmp::min(max_response_length, tail_block_size);
-        let head_convolver = FFTConvolver::init(
-            &padded_ir[0..head_ir_len],
-            head_block_size,
-            max_response_length,
-        );
+        let head_convolver =
+            FFTConvolver::init(&padded_ir[0..head_ir_len], head_block_size, head_ir_len);
 
         let tail_convolver0 = if max_response_length > tail_block_size {
             {
@@ -375,7 +375,7 @@ impl Convolution for TwoStageFFTConvolver {
                 FFTConvolver::init(
                     &padded_ir[tail_block_size..tail_block_size + tail_ir_len],
                     head_block_size,
-                    max_response_length,
+                    tail_ir_len,
                 )
             }
         } else {
@@ -391,7 +391,7 @@ impl Convolution for TwoStageFFTConvolver {
                 FFTConvolver::init(
                     &padded_ir[2 * tail_block_size..2 * tail_block_size + tail_ir_len],
                     tail_block_size,
-                    max_response_length,
+                    tail_ir_len,
                 )
             }
         } else {
@@ -404,7 +404,12 @@ impl Convolution for TwoStageFFTConvolver {
         let tail_input_fill = 0;
         let precalculated_pos = 0;
 
+        println!("head segments: {:?}", head_convolver.seg_count);
+        println!("tail0 segments: {:?}", tail_convolver0.seg_count);
+        println!("tail segments: {:?}", tail_convolver.seg_count);
+
         TwoStageFFTConvolver {
+            head_block_size,
             head_convolver,
             tail_convolver0,
             tail_output0,
@@ -438,7 +443,7 @@ impl Convolution for TwoStageFFTConvolver {
             let remaining = len - processed;
             let processing = std::cmp::min(
                 remaining,
-                HEAD_BLOCK_SIZE - (self.tail_input_fill % HEAD_BLOCK_SIZE),
+                self.head_block_size - (self.tail_input_fill % self.head_block_size),
             );
 
             // Sum head and tail
@@ -472,13 +477,13 @@ impl Convolution for TwoStageFFTConvolver {
 
             // Convolution: 1st tail block
             if !self.tail_precalculated0.is_empty()
-                && self.tail_input_fill.is_multiple_of(HEAD_BLOCK_SIZE)
+                && self.tail_input_fill.is_multiple_of(self.head_block_size)
             {
-                assert!(self.tail_input_fill >= HEAD_BLOCK_SIZE);
-                let block_offset = self.tail_input_fill - HEAD_BLOCK_SIZE;
+                assert!(self.tail_input_fill >= self.head_block_size);
+                let block_offset = self.tail_input_fill - self.head_block_size;
                 self.tail_convolver0.process(
-                    &self.tail_input[block_offset..block_offset + HEAD_BLOCK_SIZE],
-                    &mut self.tail_output0[block_offset..block_offset + HEAD_BLOCK_SIZE],
+                    &self.tail_input[block_offset..block_offset + self.head_block_size],
+                    &mut self.tail_output0[block_offset..block_offset + self.head_block_size],
                 );
                 if self.tail_input_fill == TAIL_BLOCK_SIZE {
                     std::mem::swap(&mut self.tail_precalculated0, &mut self.tail_output0);
@@ -503,4 +508,9 @@ impl Convolution for TwoStageFFTConvolver {
             processed += processing;
         }
     }
+}
+
+fn compute_tail_block_size(_response_len: usize) -> usize {
+    // TODO
+    return 1024;
 }

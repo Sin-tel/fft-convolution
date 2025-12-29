@@ -8,7 +8,7 @@ const SAMPLE_RATE: u32 = 44100;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let block_size = 64;
-    let n_blocks = 100;
+    let n_blocks = 1000;
 
     let response = generate_sinusoid(65000, 1000.0, SAMPLE_RATE, 0.1);
 
