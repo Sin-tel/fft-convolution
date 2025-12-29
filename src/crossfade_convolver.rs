@@ -65,15 +65,15 @@ impl<Convolver: Convolution> Convolution for CrossfadeConvolver<Convolver> {
 
     fn process(&mut self, input: &[f32], output: &mut [f32]) {
         if !self.is_crossfading() && self.response_pending {
-            swap(&mut self.core, &mut self.stored_response);
+            swap(&mut self.core, &self.stored_response);
             self.response_pending = false;
         }
 
         self.core.convolver_a.process(input, &mut self.buffer_a);
         self.core.convolver_b.process(input, &mut self.buffer_b);
 
-        for i in 0..output.len() {
-            output[i] = self.core.crossfader.mix(self.buffer_a[i], self.buffer_b[i]);
+        for (i, sample) in output.iter_mut().enumerate() {
+            *sample = self.core.crossfader.mix(self.buffer_a[i], self.buffer_b[i]);
         }
     }
 }
@@ -238,8 +238,8 @@ impl<T: Mixer> Crossfader<T> {
     fn mix(&mut self, a: f32, b: f32) -> f32 {
         match self.fading_state {
             FadingState::Reached(target) => match target {
-                Target::A => return a,
-                Target::B => return b,
+                Target::A => a,
+                Target::B => b,
             },
             FadingState::Approaching(target) => {
                 self.counter += 1;

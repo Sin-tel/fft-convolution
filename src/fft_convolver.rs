@@ -59,6 +59,7 @@ pub fn copy_and_pad(dst: &mut [f32], src: &[f32], src_size: usize) {
     dst[src_size..].iter_mut().for_each(|value| *value = 0.);
 }
 
+#[allow(clippy::identity_op)]
 pub fn complex_multiply_accumulate(
     result: &mut [Complex<f32>],
     a: &[Complex<f32>],
@@ -84,6 +85,7 @@ pub fn complex_multiply_accumulate(
     }
 }
 
+#[allow(clippy::identity_op)]
 pub fn sum(result: &mut [f32], a: &[f32], b: &[f32]) {
     assert_eq!(result.len(), a.len());
     assert_eq!(result.len(), b.len());
@@ -366,8 +368,8 @@ impl Convolution for TwoStageFFTConvolver {
             max_response_length,
         );
 
-        let tail_convolver0 = (max_response_length > tail_block_size)
-            .then(|| {
+        let tail_convolver0 = if max_response_length > tail_block_size {
+            {
                 let tail_ir_len =
                     std::cmp::min(max_response_length - tail_block_size, tail_block_size);
                 FFTConvolver::init(
@@ -375,22 +377,26 @@ impl Convolution for TwoStageFFTConvolver {
                     head_block_size,
                     max_response_length,
                 )
-            })
-            .unwrap_or_default();
+            }
+        } else {
+            Default::default()
+        };
 
         let tail_output0 = vec![0.0; tail_block_size];
         let tail_precalculated0 = vec![0.0; tail_block_size];
 
-        let tail_convolver = (max_response_length > 2 * tail_block_size)
-            .then(|| {
+        let tail_convolver = if max_response_length > 2 * tail_block_size {
+            {
                 let tail_ir_len = max_response_length - 2 * tail_block_size;
                 FFTConvolver::init(
                     &padded_ir[2 * tail_block_size..2 * tail_block_size + tail_ir_len],
                     tail_block_size,
                     max_response_length,
                 )
-            })
-            .unwrap_or_default();
+            }
+        } else {
+            Default::default()
+        };
 
         let tail_output = vec![0.0; tail_block_size];
         let tail_precalculated = vec![0.0; tail_block_size];
@@ -440,7 +446,7 @@ impl Convolution for TwoStageFFTConvolver {
             let sum_end = processed + processing;
 
             // Sum: 1st tail block
-            if self.tail_precalculated0.len() > 0 {
+            if !self.tail_precalculated0.is_empty() {
                 let mut precalculated_pos = self.precalculated_pos;
                 for i in sum_begin..sum_end {
                     output[i] += self.tail_precalculated0[precalculated_pos];
@@ -449,7 +455,7 @@ impl Convolution for TwoStageFFTConvolver {
             }
 
             // Sum: 2nd-Nth tail block
-            if self.tail_precalculated.len() > 0 {
+            if !self.tail_precalculated.is_empty() {
                 let mut precalculated_pos = self.precalculated_pos;
                 for i in sum_begin..sum_end {
                     output[i] += self.tail_precalculated[precalculated_pos];
@@ -465,7 +471,9 @@ impl Convolution for TwoStageFFTConvolver {
             self.tail_input_fill += processing;
 
             // Convolution: 1st tail block
-            if self.tail_precalculated0.len() > 0 && self.tail_input_fill % HEAD_BLOCK_SIZE == 0 {
+            if !self.tail_precalculated0.is_empty()
+                && self.tail_input_fill.is_multiple_of(HEAD_BLOCK_SIZE)
+            {
                 assert!(self.tail_input_fill >= HEAD_BLOCK_SIZE);
                 let block_offset = self.tail_input_fill - HEAD_BLOCK_SIZE;
                 self.tail_convolver0.process(
@@ -478,7 +486,7 @@ impl Convolution for TwoStageFFTConvolver {
             }
 
             // Convolution: 2nd-Nth tail block (might be done in some background thread)
-            if self.tail_precalculated.len() > 0
+            if !self.tail_precalculated.is_empty()
                 && self.tail_input_fill == TAIL_BLOCK_SIZE
                 && self.tail_output.len() == TAIL_BLOCK_SIZE
             {
