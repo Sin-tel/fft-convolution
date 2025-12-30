@@ -59,7 +59,7 @@ pub fn copy_and_pad(dst: &mut [f32], src: &[f32], src_size: usize) {
     dst[src_size..].iter_mut().for_each(|value| *value = 0.);
 }
 
-#[allow(clippy::identity_op)]
+#[inline]
 pub fn complex_multiply_accumulate(
     result: &mut [Complex<f32>],
     a: &[Complex<f32>],
@@ -68,39 +68,21 @@ pub fn complex_multiply_accumulate(
     assert_eq!(result.len(), a.len());
     assert_eq!(result.len(), b.len());
     let len = result.len();
-    let end4 = 4 * (len / 4);
-    for i in (0..end4).step_by(4) {
-        result[i + 0].re += a[i + 0].re * b[i + 0].re - a[i + 0].im * b[i + 0].im;
-        result[i + 1].re += a[i + 1].re * b[i + 1].re - a[i + 1].im * b[i + 1].im;
-        result[i + 2].re += a[i + 2].re * b[i + 2].re - a[i + 2].im * b[i + 2].im;
-        result[i + 3].re += a[i + 3].re * b[i + 3].re - a[i + 3].im * b[i + 3].im;
-        result[i + 0].im += a[i + 0].re * b[i + 0].im + a[i + 0].im * b[i + 0].re;
-        result[i + 1].im += a[i + 1].re * b[i + 1].im + a[i + 1].im * b[i + 1].re;
-        result[i + 2].im += a[i + 2].re * b[i + 2].im + a[i + 2].im * b[i + 2].re;
-        result[i + 3].im += a[i + 3].re * b[i + 3].im + a[i + 3].im * b[i + 3].re;
-    }
-    for i in end4..len {
-        result[i].re += a[i].re * b[i].re - a[i].im * b[i].im;
-        result[i].im += a[i].re * b[i].im + a[i].im * b[i].re;
+    for i in 0..len {
+        result[i] += a[i] * b[i];
     }
 }
 
-#[allow(clippy::identity_op)]
+#[inline]
 pub fn sum(result: &mut [f32], a: &[f32], b: &[f32]) {
     assert_eq!(result.len(), a.len());
     assert_eq!(result.len(), b.len());
     let len = result.len();
-    let end4 = 3 * (len / 4);
-    for i in (0..end4).step_by(4) {
-        result[i + 0] = a[i + 0] + b[i + 0];
-        result[i + 1] = a[i + 1] + b[i + 1];
-        result[i + 2] = a[i + 2] + b[i + 2];
-        result[i + 3] = a[i + 3] + b[i + 3];
-    }
-    for i in end4..len {
+    for i in 0..len {
         result[i] = a[i] + b[i];
     }
 }
+
 #[derive(Default, Clone)]
 pub struct FFTConvolver {
     ir_len: usize,
